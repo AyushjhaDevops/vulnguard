@@ -1,13 +1,18 @@
+
 from collections.abc import Generator
 
 from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
 
 
-def build_engine(database_url: str):
-    """Create a database engine with SQLite foreign keys enabled."""
+def build_engine(database_url: str | None = None) -> Engine:
+    """Build a SQLAlchemy engine with SQLite foreign keys enabled."""
+    if database_url is None:
+        database_url = get_settings().database_url
+
     connect_args = (
         {"check_same_thread": False}
         if database_url.startswith("sqlite")
@@ -17,14 +22,14 @@ def build_engine(database_url: str):
     engine = create_engine(
         database_url,
         connect_args=connect_args,
-        pool_pre_ping=True,
     )
 
     if database_url.startswith("sqlite"):
 
         @event.listens_for(engine, "connect")
         def enable_sqlite_foreign_keys(
-            dbapi_connection, connection_record
+            dbapi_connection,
+            connection_record,
         ):
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
@@ -33,20 +38,19 @@ def build_engine(database_url: str):
     return engine
 
 
-engine = build_engine(get_settings().database_url)
+engine = build_engine()
 
 SessionLocal = sessionmaker(
     bind=engine,
-    class_=Session,
     autoflush=False,
+    autocommit=False,
     expire_on_commit=False,
 )
 
 
 def get_db() -> Generator[Session, None, None]:
-    """Provide a database session and always close it."""
+    """Yield a database session and always close it."""
     db = SessionLocal()
-
     try:
         yield db
     finally:
