@@ -1,0 +1,19 @@
+ .gitignore                          |   3 [32m+[m
+ backend/alembic.ini                 | 149 [32m+++++++++[m
+ backend/app/core/config.py          |   5 [32m+[m[31m-[m
+ backend/app/db/__init__.py          |   0
+ backend/app/db/base.py              |   7 [32m+[m
+ backend/app/db/session.py           |  53 [32m+++[m
+ backend/app/models/__init__.py      |   7 [32m+[m
+ backend/app/models/finding.py       |  64 [32m++++[m
+ backend/app/models/repository.py    |  55 [32m+++[m
+ backend/app/models/scan.py          |  60 [32m++++[m
+ backend/app/models/user.py          |  32 [32m++[m
+ backend/migrations/README           |   1 [32m+[m
+ backend/migrations/env.py           |  64 [32m++++[m
+ backend/migrations/script.py.mako   |  28 [32m++[m
+ ...reate_initial_security_models.py | 110 [32m++++++[m
+ backend/requirements.txt            |   3 [32m+[m
+ backend/tests/test_models.py        | 185 [32m+++++++++++[m
+ docs/database-design.md             |  49 [32m+++[m
+ 18 files changed, 874 insertions(+), 1 deletion(-)
