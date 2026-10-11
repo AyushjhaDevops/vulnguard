@@ -35,3 +35,6 @@ temp/
 .vscode/
 .idea/
 .DS_Store
+
+# Local VulnGuard SQLite databases
+backend/*.db

@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_v1_prefix: str = "/api/v1"
 
+    # SQLite database, relative to the backend working directory.
+    database_url: str = "sqlite:///./vulnguard.db"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
