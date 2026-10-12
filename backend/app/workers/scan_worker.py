@@ -1,19 +1,21 @@
-
 import logging
 import os
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
+from app.models.repository import Repository
 from app.models.scan import Scan
-from app.services.scans import (
-    ScanServiceError,
-    execute_scan,
-    get_repository_workspace,
+from app.services.git_repository import (
+    GitCheckoutError,
+    checkout_repository,
+    cleanup_checkout,
 )
+from app.services.scans import execute_scan
 
 logger = logging.getLogger(__name__)
 
@@ -69,16 +71,15 @@ class ScanWorkerManager:
                 cancel_event,
             )
             self._futures[scan_id] = future
-
             future.add_done_callback(
                 lambda completed, current_id=scan_id: self._on_done(
                     current_id, completed
                 )
             )
+
     def request_cancel(self, scan_id: int) -> None:
         with self._lock:
             event = self._events.get(scan_id)
-
             if event is not None:
                 event.set()
                 logger.info("Cancellation requested for scan %s", scan_id)
@@ -102,6 +103,7 @@ class ScanWorkerManager:
         cancel_event: threading.Event,
     ) -> None:
         db: Session = SessionLocal()
+        workspace: Path | None = None
 
         try:
             scan = db.get(Scan, scan_id)
@@ -109,14 +111,10 @@ class ScanWorkerManager:
                 logger.warning("Scan %s no longer exists", scan_id)
                 return
 
-            # A cancellation may have been requested before the job started.
             db.refresh(scan)
+
             if scan.cancel_requested or cancel_event.is_set():
-                scan.status = "cancelled"
-                scan.finished_at = _utc_now()
-                scan.current_scanner = None
-                scan.progress_percent = min(scan.progress_percent, 99)
-                db.commit()
+                _mark_cancelled(db, scan)
                 return
 
             if scan.status != "queued":
@@ -127,15 +125,45 @@ class ScanWorkerManager:
                 )
                 return
 
-            target: Path = get_repository_workspace(
-                owner_id, repository_id
+            repository = db.get(Repository, repository_id)
+            if (
+                repository is None
+                or repository.owner_id != owner_id
+                or repository.id != scan.repository_id
+            ):
+                raise GitCheckoutError(
+                    "The scan repository could not be verified."
+                )
+
+            if not repository.clone_url:
+                raise GitCheckoutError(
+                    "The repository does not have a clone URL configured."
+                )
+
+            checkout = checkout_repository(
+                owner_id=owner_id,
+                repository_id=repository.id,
+                scan_id=scan.id,
+                clone_url=repository.clone_url,
+                branch=repository.default_branch,
             )
+            workspace = checkout.workspace
+
+            # A cancellation may have arrived while Git was cloning.
+            db.refresh(scan)
+            if scan.cancel_requested or cancel_event.is_set():
+                _mark_cancelled(db, scan)
+                return
+
+            scan.commit_sha = checkout.commit_sha
+            db.add(scan)
+            db.commit()
+            db.refresh(scan)
 
             def is_cancelled() -> bool:
                 if cancel_event.is_set():
                     return True
 
-                # Read a cancellation request made by another API session.
                 db.refresh(scan)
                 return scan.cancel_requested
 
@@ -146,15 +174,13 @@ class ScanWorkerManager:
                     return
 
                 scan.current_scanner = name
-                scan.progress_percent = max(
-                    0, min(int(percent), 99)
-                )
+                scan.progress_percent = max(0, min(int(percent), 99))
                 db.commit()
 
             execute_scan(
                 db,
                 scan=scan,
-                target=target,
+                target=workspace,
                 scanner_names=scanner_names,
                 cancel_check=is_cancelled,
                 progress_callback=report_progress,
@@ -174,13 +200,25 @@ class ScanWorkerManager:
                         "The background scan could not be completed. "
                         "Check server logs for diagnostic details."
                     )
+                    db.add(scan)
                     db.commit()
             except Exception:
                 db.rollback()
                 logger.exception(
                     "Could not persist failure state for scan %s", scan_id
                 )
+
         finally:
+            if workspace is not None:
+                try:
+                    cleanup_checkout(workspace)
+                except Exception:
+                    # Cleanup failure should be visible to operators without
+                    # replacing the scan's actual result.
+                    logger.exception(
+                        "Could not clean up workspace for scan %s", scan_id
+                    )
+
             db.close()
 
     def shutdown(self) -> None:
@@ -192,13 +230,19 @@ class ScanWorkerManager:
                 event.set()
 
         if executor is not None:
-            # Don't block application shutdown indefinitely on a scanner.
             executor.shutdown(wait=False, cancel_futures=False)
 
 
-def _utc_now():
-    from datetime import datetime, timezone
+def _mark_cancelled(db: Session, scan: Scan) -> None:
+    scan.status = "cancelled"
+    scan.finished_at = _utc_now()
+    scan.current_scanner = None
+    scan.error_message = None
+    db.add(scan)
+    db.commit()
 
+
+def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 

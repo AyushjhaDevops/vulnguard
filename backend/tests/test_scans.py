@@ -98,11 +98,6 @@ def prepare_scan_environment(monkeypatch, tmp_path):
     submitted = []
     cancellation_requests = []
 
-    monkeypatch.setattr(
-        "app.api.v1.scans.get_repository_workspace",
-        lambda owner_id, repository_id: tmp_path,
-    )
-
     def fake_submit(**kwargs):
         submitted.append(kwargs)
 

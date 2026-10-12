@@ -13,7 +13,6 @@ from app.services.scans import (
     ScanServiceError,
     get_owned_repository,
     get_owned_scan,
-    get_repository_workspace,
 )
 from app.workers.scan_worker import scan_worker
 from datetime import datetime, timezone
@@ -37,15 +36,6 @@ def create_scan(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found.",
         )
-
-    try:
-        # Validate that the local checkout exists before creating the job.
-        get_repository_workspace(current_user.id, repository.id)
-    except ScanServiceError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
 
     scan = Scan(
         repository_id=repository.id,
