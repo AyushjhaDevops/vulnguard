@@ -38,3 +38,9 @@ temp/
 
 # Local VulnGuard SQLite databases
 backend/*.db
+
+# Local backups
+*.backup
+
+# Local repository scan workspaces
+/workspaces/
